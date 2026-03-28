@@ -5,14 +5,17 @@ import type { Card, SpendingProfile } from "./types";
 
 const STORAGE_KEY = "cardwise_user_data";
 
-interface UserData {
-  selectedCardIds: string[];
+interface PersistedData {
   creditUsage: Record<string, Record<string, number>>; // cardId -> creditId -> used amount
   spending: SpendingProfile;
 }
 
+interface UserData extends PersistedData {
+  selectedCardIds: string[]; // session-only, not persisted
+}
+
 const DEFAULT_DATA: UserData = {
-  selectedCardIds: [],
+  selectedCardIds: [], // always starts empty each session
   creditUsage: {},
   spending: {
     dining: 500,
@@ -31,7 +34,13 @@ export function useUserData() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
-        setData(JSON.parse(stored));
+        const parsed: Partial<PersistedData> = JSON.parse(stored);
+        // Only restore spending and creditUsage — selectedCardIds always starts fresh
+        setData((d) => ({
+          ...d,
+          creditUsage: parsed.creditUsage ?? d.creditUsage,
+          spending: parsed.spending ?? d.spending,
+        }));
       } catch {
         // ignore parse errors
       }
@@ -40,7 +49,9 @@ export function useUserData() {
 
   function save(updated: UserData) {
     setData(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    // Persist only spending and creditUsage — not selectedCardIds
+    const toStore: PersistedData = { creditUsage: updated.creditUsage, spending: updated.spending };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
   }
 
   function toggleCard(cardId: string) {

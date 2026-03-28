@@ -21,7 +21,7 @@ Talk to your personal card advisor in real-time. Switch between text chat and li
 - Conversation history persists across mode switches
 
 ![AI Advisor Chat](screenshots/ai-advisor-chat.png)
-![AI Advisor Voice](screenshots/ai-advisor-voice.png)
+![AI Advisor Voice](screenshots/ad-advisor-voice.png)
 
 ---
 
@@ -80,7 +80,6 @@ Track your financial health and get a clear answer on whether you can afford a p
   - ❌ Not now (<3×)
 
 ![Wealth Tracker](screenshots/wealth.png)
-![Affordability Check](screenshots/affordability.png)
 
 ---
 
@@ -90,8 +89,6 @@ Upload a photo or video of a receipt and Gemini tells you which card you should 
 - Extracts merchant, amount, and spending category automatically
 - Recommends the optimal card from your wallet
 - Supports images and video (via Gemini Files API)
-
-![Receipt Analysis](screenshots/receipt-analysis.png)
 
 ---
 
