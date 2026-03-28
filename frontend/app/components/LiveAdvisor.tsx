@@ -166,6 +166,20 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
   useEffect(() => { pttModeRef.current   = pttMode;   }, [pttMode]);
   useEffect(() => { turnsRef.current     = turns;     }, [turns]);
 
+  // Resend context to active voice session whenever data changes (cards, wealth, credits, spending)
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Resend cards
+    ws.send(JSON.stringify({ type: "cards", ids: selectedCardIds }));
+    // Resend wealth + spending
+    const wealth   = getWealthSummary();
+    const spendCtx = getSpendingContext(spending, transactions);
+    if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth, spending: spendCtx }));
+    // Resend credit usage
+    if (creditContext) ws.send(JSON.stringify({ type: "context", text: `[Updated credit usage: ${creditContext}]` }));
+  }, [selectedCardIds, creditContext, spending, transactions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, streamingText]);
