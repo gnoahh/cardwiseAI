@@ -2,6 +2,9 @@
 
 **Hackathon project — GDG NYC 2026**
 
+Team member:
+Hoang Do
+
 An AI-powered personal credit card and financial advisor built with Gemini Live API (Native Audio 2.5).
 
 ## What it does
