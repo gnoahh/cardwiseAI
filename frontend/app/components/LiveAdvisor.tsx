@@ -82,7 +82,20 @@ function getWealthSummary(): string {
                      .reduce((s: number, a: { amount: number }) => s + a.amount, 0);
     const total  = (w.assets || []).reduce((s: number, a: { amount: number }) => s + a.amount, 0);
     const debts  = (w.liabilities || []).reduce((s: number, l: { amount: number }) => s + l.amount, 0);
-    return `net worth $${(total - debts).toLocaleString()}, liquid $${liquid.toLocaleString()}, monthly income $${(w.monthlyIncome ?? 0).toLocaleString()}`;
+
+    let summary = `net worth $${(total - debts).toLocaleString()}, liquid $${liquid.toLocaleString()}, monthly income $${(w.monthlyIncome ?? 0).toLocaleString()}`;
+
+    // Include each liability with its APR so the agent can flag high-interest debt
+    const liabilities: { label: string; amount: number; rate: number }[] = w.liabilities || [];
+    if (liabilities.length > 0) {
+      const debtDetails = liabilities
+        .filter((l) => l.amount > 0)
+        .map((l) => `${l.label} $${l.amount.toLocaleString()} at ${l.rate}% APR`)
+        .join("; ");
+      if (debtDetails) summary += `; debts: ${debtDetails}`;
+    }
+
+    return summary;
   } catch { return ""; }
 }
 
