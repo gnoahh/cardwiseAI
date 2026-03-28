@@ -23,8 +23,8 @@ const WS_BASE  = API_BASE.replace("https://", "wss://").replace("http://", "ws:/
 function resampleTo16k(buf: Float32Array, srcRate: number): Float32Array {
   if (srcRate === 16000) return buf;
   const ratio = srcRate / 16000;
-  const len = Math.floor(buf.length / ratio);
-  const out = new Float32Array(len);
+  const len   = Math.floor(buf.length / ratio);
+  const out   = new Float32Array(len);
   for (let i = 0; i < len; i++) {
     const pos = i * ratio;
     const lo  = Math.floor(pos);
@@ -40,6 +40,7 @@ function toInt16(f32: Float32Array): Int16Array {
   return i16;
 }
 
+// Schedule PCM16 @ 24 kHz for gapless playback
 function scheduleAudio(
   ctx: AudioContext,
   nextTimeRef: React.MutableRefObject<number>,
@@ -51,12 +52,13 @@ function scheduleAudio(
   const i16 = new Int16Array(bytes.buffer);
   const f32 = new Float32Array(i16.length);
   for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  // Buffer at 24 kHz — Web Audio API resamples to the context's native rate automatically
   const buf = ctx.createBuffer(1, f32.length, 24000);
   buf.getChannelData(0).set(f32);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(ctx.destination);
-  const startAt = Math.max(ctx.currentTime + 0.04, nextTimeRef.current);
+  const startAt = Math.max(ctx.currentTime + 0.05, nextTimeRef.current);
   src.start(startAt);
   nextTimeRef.current = startAt + buf.duration;
 }
@@ -68,14 +70,12 @@ function getWealthSummary(): string {
   try {
     const raw = localStorage.getItem("cardwise_wealth");
     if (!raw) return "";
-    const w = JSON.parse(raw);
-    const liquid  = (w.assets || []).filter((a: { type: string }) => a.type === "liquid")
-                      .reduce((s: number, a: { amount: number }) => s + a.amount, 0);
-    const total   = (w.assets || []).reduce((s: number, a: { amount: number }) => s + a.amount, 0);
-    const debts   = (w.liabilities || []).reduce((s: number, l: { amount: number }) => s + l.amount, 0);
-    const nw      = total - debts;
-    const income  = w.monthlyIncome ?? 0;
-    return `net worth $${nw.toLocaleString()}, liquid assets $${liquid.toLocaleString()}, total assets $${total.toLocaleString()}, total liabilities $${debts.toLocaleString()}, monthly income $${income.toLocaleString()}`;
+    const w      = JSON.parse(raw);
+    const liquid = (w.assets || []).filter((a: { type: string }) => a.type === "liquid")
+                     .reduce((s: number, a: { amount: number }) => s + a.amount, 0);
+    const total  = (w.assets || []).reduce((s: number, a: { amount: number }) => s + a.amount, 0);
+    const debts  = (w.liabilities || []).reduce((s: number, l: { amount: number }) => s + l.amount, 0);
+    return `net worth $${(total - debts).toLocaleString()}, liquid $${liquid.toLocaleString()}, monthly income $${(w.monthlyIncome ?? 0).toLocaleString()}`;
   } catch { return ""; }
 }
 
@@ -88,33 +88,32 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
   const [textInput, setTextInput]     = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  // Voice-specific state
   const [liveState, setLiveState]     = useState<LiveState>("idle");
   const [audioLevel, setAudioLevel]   = useState(0);
   const [cameraOn, setCameraOn]       = useState(false);
-  const [pttMode]                     = useState(true);  // always PTT — reliable
+  const [pttMode, setPttMode]         = useState(true);   // PTT = reliable default; always-on = hands-free
   const [pttActive, setPttActive]     = useState(false);
   const [errorMsg, setErrorMsg]       = useState("");
 
-  // Stable session ID (shared across chat + voice so server history is consistent)
-  const sessionId      = useRef(crypto.randomUUID());
-  const wsRef          = useRef<WebSocket | null>(null);
-  const captureCtxRef  = useRef<AudioContext | null>(null);
-  const playbackCtxRef = useRef<AudioContext | null>(null);
-  const processorRef   = useRef<ScriptProcessorNode | null>(null);
-  const streamRef      = useRef<MediaStream | null>(null);
+  const sessionId       = useRef(crypto.randomUUID());
+  const wsRef           = useRef<WebSocket | null>(null);
+  const captureCtxRef   = useRef<AudioContext | null>(null);
+  const playbackCtxRef  = useRef<AudioContext | null>(null);
+  const processorRef    = useRef<ScriptProcessorNode | null>(null);
+  const streamRef       = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const canvasRef      = useRef<HTMLCanvasElement>(null);
-  const nextPlayTime   = useRef(0);
-  const transcriptRef  = useRef<HTMLDivElement>(null);
-  const pttActiveRef   = useRef(false);
-  const turnsRef       = useRef<Turn[]>([]);
+  const videoRef        = useRef<HTMLVideoElement>(null);
+  const canvasRef       = useRef<HTMLCanvasElement>(null);
+  const nextPlayTime    = useRef(0);
+  const transcriptRef   = useRef<HTMLDivElement>(null);
+  const pttActiveRef    = useRef(false);
+  const pttModeRef      = useRef(true);
+  const turnsRef        = useRef<Turn[]>([]);
 
   useEffect(() => { pttActiveRef.current = pttActive; }, [pttActive]);
-  useEffect(() => { turnsRef.current = turns; }, [turns]);
+  useEffect(() => { pttModeRef.current   = pttMode;   }, [pttMode]);
+  useEffect(() => { turnsRef.current     = turns;     }, [turns]);
 
-  // Auto-scroll transcript
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, streamingText]);
@@ -152,14 +151,14 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
       }
       setTurns(t => [...t, { role: "ai", text: accumulated }]);
     } catch (err) {
-      setTurns(t => [...t, { role: "ai", text: `Sorry, something went wrong. (${err})` }]);
+      setTurns(t => [...t, { role: "ai", text: `Error: ${err}` }]);
     } finally {
       setStreamingText("");
       setChatLoading(false);
     }
   }
 
-  // ── Voice mode — cleanup ────────────────────────────────────────────────────
+  // ── Voice mode cleanup ──────────────────────────────────────────────────────
 
   const cleanupVoice = useCallback(() => {
     processorRef.current?.disconnect();
@@ -180,25 +179,62 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
     setCameraOn(false);
   }, []);
 
-  function startMicCapture(ws: WebSocket, ctx: AudioContext) {
+  // ── Mic capture ─────────────────────────────────────────────────────────────
+
+  function startMicCapture(ws: WebSocket, ctx: AudioContext, usePtt: boolean) {
     const nativeRate = ctx.sampleRate;
     const source     = ctx.createMediaStreamSource(streamRef.current!);
     const processor  = ctx.createScriptProcessor(4096, 1, 1);
 
+    let wasSpeaking  = false;
+    let silentChunks = 0;
+    const THRESH     = 0.006;
+    const SILENT_MAX = 8;   // ~0.5 s of silence after speech → send audio_end
+
     processor.onaudioprocess = (e) => {
       if (ws.readyState !== WebSocket.OPEN) return;
-      if (!pttActiveRef.current) return;  // PTT: only send while held
-      const raw = e.inputBuffer.getChannelData(0);
+      const raw   = e.inputBuffer.getChannelData(0);
       let rms = 0;
       for (let i = 0; i < raw.length; i++) rms += raw[i] * raw[i];
-      setAudioLevel(Math.min(1, Math.sqrt(rms / raw.length) * 8));
-      ws.send(toInt16(resampleTo16k(raw, nativeRate)).buffer);
+      const level = Math.sqrt(rms / raw.length);
+
+      if (usePtt) {
+        // PTT — send audio only while button is held
+        if (!pttActiveRef.current) { setAudioLevel(0); return; }
+        setAudioLevel(Math.min(1, level * 8));
+        ws.send(toInt16(resampleTo16k(raw, nativeRate)).buffer);
+      } else {
+        // Always-on — auto-detect speech start/end
+        const speaking = level > THRESH;
+        setAudioLevel(speaking ? Math.min(1, level * 8) : 0);
+
+        if (speaking && !wasSpeaking) {
+          wasSpeaking  = true;
+          silentChunks = 0;
+          ws.send(JSON.stringify({ type: "voice_start" }));  // opens activity once
+        }
+        if (wasSpeaking) {
+          ws.send(toInt16(resampleTo16k(raw, nativeRate)).buffer);
+          if (!speaking) {
+            silentChunks++;
+            if (silentChunks >= SILENT_MAX) {
+              ws.send(JSON.stringify({ type: "audio_end" }));
+              wasSpeaking  = false;
+              silentChunks = 0;
+            }
+          } else {
+            silentChunks = 0;
+          }
+        }
+      }
     };
 
     source.connect(processor);
     processor.connect(ctx.destination);
     processorRef.current = processor;
   }
+
+  // ── Start/stop voice session ────────────────────────────────────────────────
 
   async function startVoiceSession() {
     setLiveState("connecting");
@@ -216,41 +252,36 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
     }
     streamRef.current = micStream;
 
+    // Use browser's native sample rate — Web Audio API resamples 24kHz audio automatically
     const captureCtx  = new AudioContext();
     await captureCtx.resume();
     captureCtxRef.current = captureCtx;
 
-    const playbackCtx = new AudioContext({ sampleRate: 24000 });
+    const playbackCtx = new AudioContext();
     await playbackCtx.resume();
     playbackCtxRef.current = playbackCtx;
     nextPlayTime.current   = 0;
 
-    const ws = new WebSocket(`${WS_BASE}/live`);
+    const usePtt = pttModeRef.current;
+    const ws     = new WebSocket(`${WS_BASE}/live`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // 1. Send card context
       ws.send(JSON.stringify({ type: "cards", ids: selectedCardIds }));
-      // 2. Send wealth context
       const wealth = getWealthSummary();
       if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth }));
-      // 3. Inject prior chat history so the voice session continues naturally
       const history = turnsRef.current.slice(-8);
       if (history.length > 0) {
         const lines = history.map(t => `${t.role === "user" ? "User" : "Advisor"}: ${t.text}`).join("\n");
-        ws.send(JSON.stringify({
-          type: "context",
-          text: `[Prior conversation (continue naturally from here):\n${lines}]`,
-        }));
+        ws.send(JSON.stringify({ type: "context", text: `[Prior conversation:\n${lines}]` }));
       }
     };
 
     ws.onmessage = async (evt) => {
       const msg = JSON.parse(evt.data as string);
-
       if (msg.type === "ready") {
-        startMicCapture(ws, captureCtx);
+        startMicCapture(ws, captureCtx, usePtt);
         setLiveState("listening");
       }
       if (msg.type === "audio") {
@@ -258,19 +289,15 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
         setLiveState("speaking");
         scheduleAudio(playbackCtx, nextPlayTime, msg.data);
       }
-      if (msg.type === "transcript" && msg.text) {
-        setStreamingText(p => p + msg.text);
-      }
-      if (msg.type === "text" && msg.text) {
-        setStreamingText(p => p + msg.text);
-      }
+      if (msg.type === "transcript" && msg.text) setStreamingText(p => p + msg.text);
+      if (msg.type === "text"       && msg.text) setStreamingText(p => p + msg.text);
       if (msg.type === "turn_complete") {
         setLiveState("listening");
+        setAudioLevel(0);
         setStreamingText(prev => {
           if (prev.trim()) setTurns(t => [...t, { role: "ai", text: prev.trim() }]);
           return "";
         });
-        setAudioLevel(0);
       }
       if (msg.type === "error") {
         setErrorMsg(msg.message || "Connection error");
@@ -285,10 +312,7 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
       cleanupVoice();
     };
 
-    ws.onclose = () => {
-      setLiveState("idle");
-      cleanupVoice();
-    };
+    ws.onclose = () => { setLiveState("idle"); cleanupVoice(); };
   }
 
   function stopVoiceSession() {
@@ -296,20 +320,19 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
     stopCamera();
     setLiveState("idle");
     setStreamingText("");
-    setAudioLevel(0);
   }
 
   function handlePttDown() {
     setPttActive(true);
     pttActiveRef.current = true;
-    // Add user placeholder so they see recording started
-    setAudioLevel(0);
+    // Send voice_start → backend opens activity_start exactly once
+    wsRef.current?.send(JSON.stringify({ type: "voice_start" }));
   }
 
   function handlePttUp() {
     setPttActive(false);
     pttActiveRef.current = false;
-    setAudioLevel(0);
+    // Send audio_end → backend closes activity → Gemini generates response
     wsRef.current?.send(JSON.stringify({ type: "audio_end" }));
   }
 
@@ -318,10 +341,7 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
     try {
       const cam = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       cameraStreamRef.current = cam;
-      if (videoRef.current) {
-        videoRef.current.srcObject = cam;
-        await videoRef.current.play();
-      }
+      if (videoRef.current) { videoRef.current.srcObject = cam; await videoRef.current.play(); }
       setCameraOn(true);
     } catch { alert("Camera access denied."); }
   }
@@ -331,44 +351,34 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
     const c = canvasRef.current;
     c.width = 640; c.height = 480;
     c.getContext("2d")!.drawImage(videoRef.current, 0, 0, 640, 480);
-    const b64 = c.toDataURL("image/jpeg", 0.8).split(",")[1];
-    wsRef.current.send(JSON.stringify({ type: "image", data: b64 }));
+    wsRef.current.send(JSON.stringify({ type: "image", data: c.toDataURL("image/jpeg", 0.8).split(",")[1] }));
     setTurns(t => [...t, { role: "user", text: "📷 Shared camera view" }]);
   }
-
-  // When mode switches, stop the voice session
-  function switchMode(newMode: Mode) {
-    if (newMode === "chat" && (liveState === "listening" || liveState === "speaking")) {
-      stopVoiceSession();
-    }
-    setMode(newMode);
-  }
-
-  // ── Send text in either mode ────────────────────────────────────────────────
 
   function handleSend() {
     const message = textInput.trim();
     if (!message) return;
-
     if (mode === "voice" && wsRef.current?.readyState === WebSocket.OPEN) {
-      // Send via WebSocket (agent will respond with audio)
       wsRef.current.send(JSON.stringify({ type: "text", text: message }));
       setTurns(t => [...t, { role: "user", text: message }]);
       setTextInput("");
     } else {
-      // Send via HTTP (text response)
       sendChatMessage(message);
-      if (mode === "voice") setTextInput(""); // sendChatMessage handles it for chat mode
     }
+  }
+
+  function switchMode(m: Mode) {
+    if (m === "chat" && (liveState === "listening" || liveState === "speaking")) stopVoiceSession();
+    setMode(m);
   }
 
   const isVoiceActive = liveState === "listening" || liveState === "speaking";
   const glowAlpha     = isVoiceActive ? 0.35 + audioLevel * 0.45 : 0.15;
-  const glowSize      = isVoiceActive ? 30 + audioLevel * 50     : 20;
+  const glowSize      = isVoiceActive ? 28 + audioLevel * 50     : 18;
   const orbGradient   =
-    liveState === "speaking"    ? "linear-gradient(135deg,#52d9a0,#3bb87e)"
-    : liveState === "error"     ? "linear-gradient(135deg,#ef4444,#991b1b)"
-    : liveState === "connecting"? "linear-gradient(135deg,#666,#444)"
+    liveState === "speaking"     ? "linear-gradient(135deg,#52d9a0,#3bb87e)"
+    : liveState === "error"      ? "linear-gradient(135deg,#ef4444,#991b1b)"
+    : liveState === "connecting" ? "linear-gradient(135deg,#555,#333)"
     : "linear-gradient(135deg,#c36dbb,#8f8fbf)";
 
   const hasWealth = !!getWealthSummary();
@@ -376,22 +386,22 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
   return (
     <div className="flex flex-col gap-4" style={{ minHeight: "calc(100vh - 14rem)" }}>
 
-      {/* Header badges */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full glass text-[11px]">
-          <div className="w-1.5 h-1.5 rounded-full transition-all duration-300"
+          <div className="w-1.5 h-1.5 rounded-full transition-all"
             style={{ background: isVoiceActive ? "#52d9a0" : "#333", boxShadow: isVoiceActive ? "0 0 6px #52d9a0" : "none" }} />
           <span style={{ color: isVoiceActive ? "#52d9a0" : "#555" }}>Gemini Live · Multimodal</span>
           <Sparkles size={10} style={{ color: "#c36dbb" }} />
         </div>
         {hasWealth && (
           <span className="text-[10px] px-2 py-1 rounded-full glass" style={{ color: "#52d9a0" }}>
-            💰 Wealth data loaded
+            💰 Wealth loaded
           </span>
         )}
       </div>
 
-      {/* Mode selector */}
+      {/* Mode tabs */}
       <div className="flex items-center gap-1 rounded-full p-0.5 glass self-start">
         {([
           { id: "chat",  label: "Chat",  icon: <MessageSquare size={12} /> },
@@ -407,18 +417,37 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
         ))}
       </div>
 
-      {/* ── VOICE MODE CONTROLS ── */}
+      {/* ── VOICE CONTROLS ── */}
       {mode === "voice" && (
         <div className="flex flex-col items-center gap-3">
+
+          {/* PTT / Always-on — only when not in an active session */}
+          {!isVoiceActive && liveState !== "connecting" && (
+            <div className="flex items-center gap-1 rounded-full p-0.5 glass">
+              {([
+                { label: "Push to talk", value: true  },
+                { label: "Always on",   value: false },
+              ] as const).map(({ label, value }) => (
+                <button key={label} onClick={() => setPttMode(value)}
+                  className="px-3 py-1 rounded-full text-[11px] font-medium transition-all"
+                  style={pttMode === value
+                    ? { background: "rgba(195,109,187,0.15)", color: "#ddd" }
+                    : { color: "#444" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Orb */}
           <button
             onClick={isVoiceActive ? undefined : startVoiceSession}
             disabled={liveState === "connecting"}
-            onMouseDown={isVoiceActive && pttMode ? handlePttDown : undefined}
-            onMouseUp={isVoiceActive && pttMode ? handlePttUp : undefined}
+            onMouseDown={isVoiceActive && pttMode ? handlePttDown  : undefined}
+            onMouseUp  ={isVoiceActive && pttMode ? handlePttUp    : undefined}
             onTouchStart={isVoiceActive && pttMode ? (e) => { e.preventDefault(); handlePttDown(); } : undefined}
-            onTouchEnd={isVoiceActive && pttMode ? (e) => { e.preventDefault(); handlePttUp(); } : undefined}
-            className="w-28 h-28 rounded-full flex items-center justify-center transition-all duration-100"
+            onTouchEnd  ={isVoiceActive && pttMode ? (e) => { e.preventDefault(); handlePttUp();   } : undefined}
+            className="w-28 h-28 rounded-full flex items-center justify-center transition-all duration-100 select-none"
             style={{
               background: orbGradient,
               boxShadow: `0 0 ${glowSize}px ${glowSize/3}px rgba(195,109,187,${glowAlpha}), 0 0 ${glowSize*2}px ${glowSize/2}px rgba(143,143,191,${glowAlpha*0.4})`,
@@ -430,60 +459,51 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
           </button>
 
           {/* Status */}
-          <p className="text-sm" style={{ color: liveState === "error" ? "#ef4444" : "#777" }}>
-            {liveState === "error"     ? errorMsg
-            : liveState === "idle"       ? "Tap orb to connect"
+          <p className="text-sm text-center" style={{ color: liveState === "error" ? "#ef4444" : "#666" }}>
+            {liveState === "error"       ? errorMsg
+            : liveState === "idle"       ? "Tap to connect"
             : liveState === "connecting" ? "Connecting..."
             : liveState === "speaking"   ? "Gemini is speaking..."
-            : pttActive                  ? "● Recording — release to send"
-            : "Hold orb to speak · or type below"}
+            : pttMode
+              ? pttActive ? "● Recording — release to send" : "Hold orb to speak"
+              : "Speak naturally — I'm listening"}
           </p>
 
-          {/* PTT hint */}
-          {isVoiceActive && (
-            <p className="text-[10px]" style={{ color: pttActive ? "#52d9a0" : "#555" }}>
-              Push to talk — hold the orb while speaking, release to send
-            </p>
-          )}
-
-          {/* Mic level */}
+          {/* Mic level bars */}
           {isVoiceActive && (
             <div className="flex items-end gap-0.5 h-5">
-              {Array.from({ length: 16 }).map((_, i) => {
-                const active = audioLevel > i / 16;
-                return (
-                  <div key={i} className="w-1 rounded-full transition-all duration-75"
-                    style={{ height: `${5 + i * 0.9}px`, background: active ? (liveState === "speaking" ? "#52d9a0" : "#c36dbb") : "rgba(255,255,255,0.06)" }} />
-                );
-              })}
+              {Array.from({ length: 16 }).map((_, i) => (
+                <div key={i} className="w-1 rounded-full transition-all duration-75"
+                  style={{
+                    height: `${5 + i * 0.9}px`,
+                    background: audioLevel > i / 16
+                      ? (liveState === "speaking" ? "#52d9a0" : "#c36dbb")
+                      : "rgba(255,255,255,0.06)",
+                  }} />
+              ))}
             </div>
           )}
 
-          {/* Stop button */}
+          {/* Session controls */}
           {isVoiceActive && (
-            <button onClick={stopVoiceSession}
-              className="text-xs px-4 py-1.5 rounded-xl glass transition-all"
-              style={{ color: "#777", border: "1px solid rgba(255,255,255,0.08)" }}>
-              End session
-            </button>
-          )}
-
-          {/* Camera controls */}
-          {isVoiceActive && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-center">
+              <button onClick={stopVoiceSession}
+                className="text-xs px-4 py-1.5 rounded-xl glass" style={{ color: "#777" }}>
+                End session
+              </button>
               <button onClick={toggleCamera}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all glass"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs glass"
                 style={cameraOn
                   ? { background: "rgba(195,109,187,0.1)", border: "1px solid rgba(195,109,187,0.3)", color: "#c36dbb" }
                   : { color: "#666" }}>
                 {cameraOn ? <Camera size={13} /> : <CameraOff size={13} />}
-                {cameraOn ? "Camera on" : "Share camera"}
+                {cameraOn ? "Camera on" : "Camera"}
               </button>
               {cameraOn && (
                 <button onClick={sendCameraFrame}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs"
                   style={{ background: "rgba(82,217,160,0.08)", border: "1px solid rgba(82,217,160,0.25)", color: "#52d9a0" }}>
-                  <Camera size={13} /> Send frame
+                  <Camera size={13} /> Snap
                 </button>
               )}
             </div>
@@ -511,19 +531,13 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
         </div>
       )}
 
-      {/* ── CHAT MODE empty state ── */}
+      {/* ── CHAT empty state ── */}
       {mode === "chat" && turns.length === 0 && !streamingText && (
-        <div className="flex flex-col items-center gap-3 py-6">
-          <p className="text-[#333] text-xs">Ask anything about your cards, benefits, or finances</p>
+        <div className="flex flex-col items-center gap-3 py-4">
+          <p className="text-[#333] text-xs">Ask about your cards, benefits, or finances</p>
           <div className="flex flex-wrap justify-center gap-1.5">
-            {[
-              "Which card for dining?",
-              "Can I afford an iPhone?",
-              "What credits am I missing?",
-              "Can I afford a vacation?",
-            ].map(q => (
-              <button key={q}
-                onClick={() => sendChatMessage(q)}
+            {["Which card for dining?", "Can I afford an iPhone?", "What credits am I missing?", "Can I afford a vacation?"].map(q => (
+              <button key={q} onClick={() => sendChatMessage(q)}
                 className="text-[10px] text-[#555] px-2.5 py-1 rounded-full hover:text-[#aaa] transition-colors"
                 style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
                 {q}
@@ -534,10 +548,10 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
       )}
 
       {/* ── Shared transcript ── */}
-      {(turns.length > 0 || streamingText) && (
+      {(turns.length > 0 || streamingText || chatLoading) && (
         <div ref={transcriptRef}
           className="flex-1 space-y-2 overflow-y-auto rounded-2xl p-3"
-          style={{ maxHeight: "340px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+          style={{ maxHeight: "360px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
           {turns.map((t, i) => (
             <div key={i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
               <div className="max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap"
@@ -549,31 +563,21 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
             </div>
           ))}
 
-          {streamingText && (
+          {(streamingText || chatLoading) && (
             <div className="flex justify-start">
               <div className="max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap"
                 style={{ background: "rgba(82,217,160,0.06)", border: "1px solid rgba(82,217,160,0.15)", color: "#ccc" }}>
-                {streamingText}
-                <span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: "#52d9a0" }} />
-              </div>
-            </div>
-          )}
-
-          {chatLoading && !streamingText && (
-            <div className="flex justify-start">
-              <div className="rounded-2xl px-4 py-2.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                <div className="flex gap-1">
-                  {[0,1,2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#555", animationDelay: `${i * 0.15}s` }} />
-                  ))}
-                </div>
+                {streamingText
+                  ? <>{streamingText}<span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: "#52d9a0" }} /></>
+                  : <div className="flex gap-1 py-0.5">{[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#555", animationDelay: `${i*0.15}s` }} />)}</div>
+                }
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ── Text input (both modes) ── */}
+      {/* ── Text input ── */}
       <div className="w-full flex items-center gap-2 px-3 rounded-2xl"
         style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
         <input
@@ -581,26 +585,21 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
           onChange={e => setTextInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSend()}
           placeholder={
-            mode === "voice" && isVoiceActive
-              ? "Type a question (or hold orb to speak)..."
-              : mode === "voice"
-              ? "Type to chat, or connect voice above..."
-              : "Ask about your cards, benefits, or finances..."
+            mode === "voice" && isVoiceActive ? "Type a question, or hold orb to speak..."
+            : mode === "voice"                ? "Type to chat, or tap orb for voice..."
+            : "Ask about your cards, benefits, or finances..."
           }
           className="flex-1 bg-transparent py-2.5 text-white text-sm placeholder-[#333] focus:outline-none"
         />
-        <button
-          onClick={handleSend}
-          disabled={!textInput.trim() || chatLoading}
+        <button onClick={handleSend} disabled={!textInput.trim() || chatLoading}
           className="text-[#444] hover:text-[#c36dbb] disabled:opacity-20 transition-colors">
           <Send size={14} />
         </button>
       </div>
 
-      {/* No wealth data hint */}
-      {!hasWealth && mode === "chat" && (
-        <p className="text-[10px] text-[#2e2e2e] text-center">
-          Add assets in the Wealth tab to get affordability advice
+      {!hasWealth && (
+        <p className="text-[10px] text-[#2a2a2a] text-center">
+          Add assets in the Wealth tab for affordability advice
         </p>
       )}
     </div>

@@ -337,7 +337,14 @@ async def live_session(websocket: WebSocket):
 
                 IMPORTANT: Only use send_realtime_input throughout — mixing
                 send_client_content with send_realtime_input breaks multi-turn.
+
+                Audio turn protocol:
+                  client sends {"type":"voice_start"} → we send activity_start ONCE
+                  client sends raw PCM bytes         → we forward audio (no activity_start)
+                  client sends {"type":"audio_end"}  → we send activity_end
                 """
+                audio_active = False  # True between voice_start and audio_end
+
                 while True:
                     try:
                         msg = await websocket.receive()
@@ -345,17 +352,25 @@ async def live_session(websocket: WebSocket):
                         break
 
                     if "bytes" in msg:
-                        # Raw PCM16 audio — wrapped with activity signals
-                        await session.send_realtime_input(activity_start=types.ActivityStart())
-                        await session.send_realtime_input(
-                            audio=types.Blob(data=msg["bytes"], mime_type="audio/pcm;rate=16000")
-                        )
-                        # audio_end message from client will send activity_end
+                        # Raw PCM16 audio — only forward if an activity is open
+                        if audio_active:
+                            await session.send_realtime_input(
+                                audio=types.Blob(data=msg["bytes"], mime_type="audio/pcm;rate=16000")
+                            )
                     elif "text" in msg:
                         data = json.loads(msg["text"])
                         kind = data.get("type")
-                        if kind == "text":
-                            # Wrap text with explicit activity signals for reliable turn detection
+                        if kind == "voice_start":
+                            # Client signals start of a voice turn — open activity ONCE
+                            if not audio_active:
+                                await session.send_realtime_input(activity_start=types.ActivityStart())
+                                audio_active = True
+                        elif kind == "audio_end":
+                            # Client signals end of voice turn — close activity
+                            if audio_active:
+                                await session.send_realtime_input(activity_end=types.ActivityEnd())
+                                audio_active = False
+                        elif kind == "text":
                             await session.send_realtime_input(activity_start=types.ActivityStart())
                             await session.send_realtime_input(text=data["text"])
                             await session.send_realtime_input(activity_end=types.ActivityEnd())
@@ -369,13 +384,9 @@ async def live_session(websocket: WebSocket):
                                 text="Analyze this image. What merchant is this, how much is it, and which of my cards should I use?"
                             )
                             await session.send_realtime_input(activity_end=types.ActivityEnd())
-                        elif kind == "audio_end":
-                            # End of voice turn — signal Gemini to respond
-                            await session.send_realtime_input(activity_end=types.ActivityEnd())
                         elif kind == "cards":
                             held = [CARD_DATABASE[c]["name"] for c in data.get("ids", []) if c in CARD_DATABASE]
                             if held:
-                                # Context injection — no activity wrapping
                                 await session.send_realtime_input(
                                     text=f"[Context: The user currently holds these cards: {', '.join(held)}. Always factor this in when giving card recommendations.]"
                                 )
@@ -386,7 +397,6 @@ async def live_session(websocket: WebSocket):
                                     text=f"[Context: User's financial profile — {summary}. Use this when answering any affordability questions.]"
                                 )
                         elif kind == "context":
-                            # Prior conversation history injection (no activity signals)
                             text = data.get("text", "")
                             if text:
                                 await session.send_realtime_input(text=text)
