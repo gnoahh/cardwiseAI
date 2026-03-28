@@ -39,6 +39,8 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [autoOpenROI, setAutoOpenROI] = useState(false);
   const [allCards, setAllCards] = useState<Card[]>([]);
+  // Track which tabs have been visited — once mounted, keep mounted (never reset state on tab switch)
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(new Set<Tab>(["dashboard"]));
 
   // Transactions from Plaid/demo
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -91,6 +93,7 @@ export default function Home() {
   function navigateTo(t: Tab, opts?: { openROI?: boolean }) {
     setTab(t);
     setAutoOpenROI(!!opts?.openROI);
+    setMountedTabs((prev) => { const next = new Set(prev); next.add(t); return next; });
   }
 
   return (
@@ -165,59 +168,76 @@ export default function Home() {
             <p className="text-[#555] text-xs mt-0.5">{SUBTITLES[tab]}</p>
           </div>
 
-          {tab === "dashboard" && (
-            <Dashboard
-              selectedCards={selectedCards}
-              getCreditUsed={getEffectiveCreditUsed}
-              onNavigate={(t, opts) => navigateTo(t as Tab, opts)}
-              onTransactionsLoaded={handleTransactionsLoaded}
-              onPlaidCardsDetected={handlePlaidCardsDetected}
-            />
-          )}
+          {/* Each tab mounts once on first visit and stays mounted — display:none hides inactive tabs
+              so local state (demo data, wealth entries, chat history) is never reset on tab switch. */}
 
-          {tab === "cards" && (
-            allCards.length === 0 ? (
-              <div className="glass rounded-2xl p-16 text-center">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: "rgba(195,109,187,0.1)" }}>
-                  <CreditCard size={22} style={{ color: "#c36dbb" }} />
-                </div>
-                <p className="text-[#777] text-sm">Backend not connected</p>
-                <p className="text-[#444] text-xs mt-1">Start the FastAPI server on port 8000</p>
-              </div>
-            ) : (
-              <CardPicker
-                cards={allCards}
-                selectedIds={selectedCardIds}
-                onToggle={toggleCard}
-                plaidConnected={transactions.length > 0}
+          <div style={{ display: tab === "dashboard" ? undefined : "none" }}>
+            {mountedTabs.has("dashboard") && (
+              <Dashboard
+                selectedCards={selectedCards}
+                getCreditUsed={getEffectiveCreditUsed}
+                onNavigate={(t, opts) => navigateTo(t as Tab, opts)}
+                onTransactionsLoaded={handleTransactionsLoaded}
+                onPlaidCardsDetected={handlePlaidCardsDetected}
               />
-            )
-          )}
+            )}
+          </div>
 
-          {tab === "benefits" && (
-            <BenefitTracker
-              cards={selectedCards}
-              getCreditUsed={getEffectiveCreditUsed}
-              onMarkUsed={handleMarkUsed}
-              transactions={transactions}
-            />
-          )}
+          <div style={{ display: tab === "cards" ? undefined : "none" }}>
+            {mountedTabs.has("cards") && (
+              allCards.length === 0 ? (
+                <div className="glass rounded-2xl p-16 text-center">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: "rgba(195,109,187,0.1)" }}>
+                    <CreditCard size={22} style={{ color: "#c36dbb" }} />
+                  </div>
+                  <p className="text-[#777] text-sm">Backend not connected</p>
+                  <p className="text-[#444] text-xs mt-1">Start the FastAPI server on port 8000</p>
+                </div>
+              ) : (
+                <CardPicker
+                  cards={allCards}
+                  selectedIds={selectedCardIds}
+                  onToggle={toggleCard}
+                  plaidConnected={transactions.length > 0}
+                />
+              )
+            )}
+          </div>
 
-          {tab === "spend" && (
-            <SpendGuide
-              selectedCards={selectedCards}
-              selectedCardIds={selectedCardIds}
-              spending={spending}
-              onSpendingChange={updateSpending}
-              autoOpenROI={autoOpenROI}
-            />
-          )}
+          <div style={{ display: tab === "benefits" ? undefined : "none" }}>
+            {mountedTabs.has("benefits") && (
+              <BenefitTracker
+                cards={selectedCards}
+                getCreditUsed={getEffectiveCreditUsed}
+                onMarkUsed={handleMarkUsed}
+                transactions={transactions}
+              />
+            )}
+          </div>
 
-          {tab === "wealth" && (
-            <WealthTracker monthlySpend={monthlySpend} transactions={transactions} />
-          )}
+          <div style={{ display: tab === "spend" ? undefined : "none" }}>
+            {mountedTabs.has("spend") && (
+              <SpendGuide
+                selectedCards={selectedCards}
+                selectedCardIds={selectedCardIds}
+                spending={spending}
+                onSpendingChange={updateSpending}
+                autoOpenROI={autoOpenROI}
+              />
+            )}
+          </div>
 
-          {tab === "chat" && <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} transactions={transactions} />}
+          <div style={{ display: tab === "wealth" ? undefined : "none" }}>
+            {mountedTabs.has("wealth") && (
+              <WealthTracker monthlySpend={monthlySpend} transactions={transactions} />
+            )}
+          </div>
+
+          <div style={{ display: tab === "chat" ? undefined : "none" }}>
+            {mountedTabs.has("chat") && (
+              <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} transactions={transactions} />
+            )}
+          </div>
         </div>
       </main>
     </div>
