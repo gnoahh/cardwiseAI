@@ -88,7 +88,18 @@ Examples of affordability questions: "can I afford an iPhone?", "should I buy a 
 """
 
 
-def get_client(api_key: str) -> genai.Client:
+def get_client(api_key: str = "") -> genai.Client:
+    """Return a Gemini client. Prefers Vertex AI (uses GCP credits, higher quota).
+    Falls back to Gemini API key if GCP_PROJECT is not set."""
+    gcp_project = os.getenv("GCP_PROJECT", "")
+    if gcp_project:
+        return genai.Client(vertexai=True, project=gcp_project, location="us-central1")
+    return genai.Client(api_key=api_key)
+
+
+def get_live_client(api_key: str) -> genai.Client:
+    """Always use Gemini API key for the Live endpoint — native audio
+    preview model is not yet available on Vertex AI."""
     return genai.Client(api_key=api_key)
 
 

@@ -90,6 +90,21 @@ export default function Home() {
 
   const monthlySpend = transactions.length > 0 ? totalSpend(transactions) : Object.values(spending).reduce((a, b) => a + b, 0);
 
+  // Build a credit usage summary string for the AI advisor
+  const creditContext = useMemo(() => {
+    if (selectedCards.length === 0) return "";
+    const parts: string[] = [];
+    for (const card of selectedCards) {
+      for (const credit of card.credits) {
+        const used = getEffectiveCreditUsed(card.id, credit.id);
+        const remaining = credit.amount - used;
+        const status = remaining <= 0 ? "fully used" : used > 0 ? `$${used} used, $${remaining} remaining` : `$${remaining} available (unused)`;
+        parts.push(`${card.name} - ${credit.name} ($${credit.amount} ${credit.frequency}): ${status}`);
+      }
+    }
+    return parts.join("; ");
+  }, [selectedCards, getEffectiveCreditUsed]);
+
   function navigateTo(t: Tab, opts?: { openROI?: boolean }) {
     setTab(t);
     setAutoOpenROI(!!opts?.openROI);
@@ -235,7 +250,7 @@ export default function Home() {
 
           <div style={{ display: tab === "chat" ? undefined : "none" }}>
             {mountedTabs.has("chat") && (
-              <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} transactions={transactions} />
+              <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} transactions={transactions} creditContext={creditContext} />
             )}
           </div>
         </div>

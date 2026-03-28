@@ -18,6 +18,7 @@ interface Props {
   selectedCardIds: string[];
   spending?: SpendingProfile;
   transactions?: Transaction[];
+  creditContext?: string;
 }
 
 type Mode = "chat" | "voice";
@@ -132,7 +133,7 @@ function getSpendingContext(spending?: SpendingProfile, transactions?: Transacti
   return entries.length ? entries.join("; ") : "";
 }
 
-export default function LiveAdvisor({ selectedCardIds, spending, transactions }: Props) {
+export default function LiveAdvisor({ selectedCardIds, spending, transactions, creditContext }: Props) {
   const [mode, setMode]               = useState<Mode>("chat");
   const [turns, setTurns]             = useState<Turn[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -189,6 +190,7 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions }:
           user_cards: selectedCardIds,
           wealth_context: getWealthSummary(),
           spending_context: getSpendingContext(spending, transactions),
+          credit_context: creditContext ?? "",
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -324,6 +326,7 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions }:
       const wealth   = getWealthSummary();
       const spendCtx = getSpendingContext(spending, transactions);
       if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth, spending: spendCtx }));
+      if (creditContext) ws.send(JSON.stringify({ type: "context", text: `[User's card credit usage this period: ${creditContext}]` }));
       const history = turnsRef.current.slice(-8);
       if (history.length > 0) {
         const lines = history.map(t => `${t.role === "user" ? "User" : "Advisor"}: ${t.text}`).join("\n");

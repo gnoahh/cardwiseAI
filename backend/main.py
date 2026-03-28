@@ -18,7 +18,7 @@ from PIL import Image
 import io
 
 from card_data import get_all_cards, get_card, get_cards_context_for_ai, CARD_DATABASE
-from agent import get_client, get_system_instruction, calculate_roi, get_swipe_recommendation
+from agent import get_client, get_live_client, get_system_instruction, calculate_roi, get_swipe_recommendation
 
 load_dotenv()
 
@@ -50,6 +50,7 @@ class ChatMessage(BaseModel):
     user_cards: list = []
     wealth_context: str = ""    # e.g. "net worth $88k, liquid $30k, monthly income $7.5k"
     spending_context: str = ""  # e.g. "dining: $380/$400, groceries: $200/$400"
+    credit_context: str = ""    # e.g. "Amex Gold - Dining Credit: $0/$10 used (available); Uber Cash: $10/$10 used"
 
 
 class ROIRequest(BaseModel):
@@ -119,6 +120,8 @@ async def chat(msg: ChatMessage):
         prefix += f"[User's financial profile: {msg.wealth_context}]\n"
     if msg.spending_context:
         prefix += f"[User's monthly spending: {msg.spending_context}]\n"
+    if msg.credit_context:
+        prefix += f"[User's card credit usage this period: {msg.credit_context}]\n"
     prefix += "\n"
 
     full_message = prefix + msg.message
@@ -284,7 +287,8 @@ async def live_session(websocket: WebSocket):
         await websocket.close()
         return
 
-    client = get_client(GEMINI_API_KEY)
+    # Live API (native audio) is not on Vertex AI yet — always use Gemini API key
+    client = get_live_client(GEMINI_API_KEY)
     system_instruction = get_system_instruction()
 
     live_config = types.LiveConnectConfig(
