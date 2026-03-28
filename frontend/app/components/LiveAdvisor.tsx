@@ -22,7 +22,7 @@ interface Props {
 }
 
 type Mode = "chat" | "voice";
-type LiveState = "idle" | "connecting" | "listening" | "speaking" | "error";
+type LiveState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
 interface Turn {
   role: "user" | "ai";
@@ -158,9 +158,10 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
   const canvasRef       = useRef<HTMLCanvasElement>(null);
   const nextPlayTime    = useRef(0);
   const transcriptRef   = useRef<HTMLDivElement>(null);
-  const pttActiveRef    = useRef(false);
-  const pttModeRef      = useRef(true);
-  const turnsRef        = useRef<Turn[]>([]);
+  const pttActiveRef      = useRef(false);
+  const pttModeRef        = useRef(true);
+  const turnsRef          = useRef<Turn[]>([]);
+  const userTranscriptRef = useRef("");  // accumulates live input transcription
 
   useEffect(() => { pttActiveRef.current = pttActive; }, [pttActive]);
   useEffect(() => { pttModeRef.current   = pttMode;   }, [pttMode]);
@@ -359,13 +360,31 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
         setLiveState("speaking");
         scheduleAudio(playbackCtx, nextPlayTime, msg.data);
       }
-      if (msg.type === "transcript" && msg.text) setStreamingText(p => p + msg.text);
-      if (msg.type === "text"       && msg.text) setStreamingText(p => p + msg.text);
+      // User's voice — stream into the pending user turn
+      if (msg.type === "user_transcript" && msg.text) {
+        userTranscriptRef.current += msg.text;
+        setStreamingText("__user__" + userTranscriptRef.current);
+      }
+      // Agent's transcript — switch from user turn to agent turn
+      if (msg.type === "transcript" && msg.text) {
+        if (streamingText.startsWith("__user__") || userTranscriptRef.current) {
+          // Finalize user turn, start agent turn
+          const userText = userTranscriptRef.current.trim();
+          if (userText) setTurns(t => [...t, { role: "user", text: userText }]);
+          userTranscriptRef.current = "";
+          setStreamingText(msg.text);
+        } else {
+          setStreamingText(p => p.startsWith("__user__") ? msg.text : p + msg.text);
+        }
+      }
+      if (msg.type === "text" && msg.text) setStreamingText(p => p.startsWith("__user__") ? msg.text : p + msg.text);
       if (msg.type === "turn_complete") {
         setLiveState("listening");
         setAudioLevel(0);
+        userTranscriptRef.current = "";
         setStreamingText(prev => {
-          if (prev.trim()) setTurns(t => [...t, { role: "ai", text: prev.trim() }]);
+          const text = prev.startsWith("__user__") ? "" : prev.trim();
+          if (text) setTurns(t => [...t, { role: "ai", text }]);
           return "";
         });
       }
@@ -404,6 +423,7 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
     pttActiveRef.current = false;
     // Send audio_end → backend closes activity → Gemini generates response
     wsRef.current?.send(JSON.stringify({ type: "audio_end" }));
+    setLiveState("thinking");
   }
 
   async function toggleCamera() {
@@ -533,6 +553,7 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
             {liveState === "error"       ? errorMsg
             : liveState === "idle"       ? "Tap to connect"
             : liveState === "connecting" ? "Connecting..."
+            : liveState === "thinking"   ? "Thinking..."
             : liveState === "speaking"   ? "Gemini is speaking..."
             : pttMode
               ? pttActive ? "● Recording — release to send" : "Hold orb to speak"
@@ -618,7 +639,7 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
       )}
 
       {/* ── Shared transcript ── */}
-      {(turns.length > 0 || streamingText || chatLoading) && (
+      {(turns.length > 0 || streamingText || chatLoading || liveState === "thinking") && (
         <div ref={transcriptRef}
           className="flex-1 space-y-2 overflow-y-auto rounded-2xl p-3"
           style={{ maxHeight: "360px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
@@ -633,11 +654,33 @@ export default function LiveAdvisor({ selectedCardIds, spending, transactions, c
             </div>
           ))}
 
-          {(streamingText || chatLoading) && (
+          {/* Voice: user speaking — show live transcript as user bubble */}
+          {streamingText.startsWith("__user__") && (
+            <div className="flex justify-end">
+              <div className="max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap"
+                style={{ background: "linear-gradient(135deg,rgba(195,109,187,0.5),rgba(143,143,191,0.5))", color: "#fff" }}>
+                {streamingText.slice(8)}
+                <span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: "rgba(255,255,255,0.6)" }} />
+              </div>
+            </div>
+          )}
+
+          {/* Thinking dots — after PTT released, before agent responds */}
+          {(liveState === "thinking" && !streamingText) && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl px-3 py-2"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                <div className="flex gap-1 py-0.5">{[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#555", animationDelay: `${i*0.15}s` }} />)}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Agent streaming response or chat loading */}
+          {(streamingText && !streamingText.startsWith("__user__") || chatLoading) && (
             <div className="flex justify-start">
               <div className="max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap"
                 style={{ background: "rgba(82,217,160,0.06)", border: "1px solid rgba(82,217,160,0.15)", color: "#ccc" }}>
-                {streamingText
+                {streamingText && !streamingText.startsWith("__user__")
                   ? <>{streamingText}<span className="inline-block w-0.5 h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: "#52d9a0" }} /></>
                   : <div className="flex gap-1 py-0.5">{[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#555", animationDelay: `${i*0.15}s` }} />)}</div>
                 }

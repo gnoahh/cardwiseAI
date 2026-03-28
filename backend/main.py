@@ -300,6 +300,7 @@ async def live_session(websocket: WebSocket):
     live_config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         system_instruction=system_instruction,
+        input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         # Disable auto-VAD so we control turn boundaries explicitly —
         # required for reliable multi-turn in both voice and text modes.
@@ -335,12 +336,17 @@ async def live_session(websocket: WebSocket):
                                 await websocket.send_json({"type": "text", "text": msg.text})
                             sc = getattr(msg, "server_content", None)
                             if sc:
-                                # Output transcription (text alongside audio)
+                                # Output transcription (agent speaking)
                                 tr = getattr(sc, "output_transcription", None)
                                 if tr and getattr(tr, "text", None):
                                     await websocket.send_json({"type": "transcript", "text": tr.text})
                                 if getattr(sc, "turn_complete", False):
                                     await websocket.send_json({"type": "turn_complete"})
+                            # Input transcription (user speaking) — stream back so UI can show it
+                            sc2 = getattr(msg, "server_content", None) or getattr(msg, "client_content", None)
+                            in_tr = getattr(msg, "input_transcription", None)
+                            if in_tr and getattr(in_tr, "text", None):
+                                await websocket.send_json({"type": "user_transcript", "text": in_tr.text})
                     except asyncio.CancelledError:
                         raise  # propagate cancellation — task is being shut down
                     except Exception:
