@@ -83,6 +83,15 @@ export function affordabilityCheck(purchaseAmount: number, liquid: number, month
   return { verdict, message, color, tenX, canAfford, monthsToAfford, percentOfLiquid };
 }
 
+// Seed localStorage with DEFAULT_WEALTH if the key has never been set.
+// Call once at app start so AI Advisor always has financial context.
+export function initWealthStorage() {
+  if (typeof window === "undefined") return;
+  if (!localStorage.getItem("cardwise_wealth")) {
+    localStorage.setItem("cardwise_wealth", JSON.stringify(DEFAULT_WEALTH));
+  }
+}
+
 // Financial health insights
 export function getInsights(w: WealthProfile, monthlySpend: number): string[] {
   const insights: string[] = [];

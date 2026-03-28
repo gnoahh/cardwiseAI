@@ -106,18 +106,19 @@ async def chat(msg: ChatMessage):
     # Build conversation history
     history = chat_histories.get(msg.session_id, [])
 
-    # Inject card + wealth context into the first message of a session
-    user_card_context = ""
+    # Prepend card context on first message; prepend wealth on every message
+    # so the model always has financial data when answering affordability questions.
+    prefix = ""
     if not history:
         held_cards = [CARD_DATABASE[cid]["name"] for cid in msg.user_cards if cid in CARD_DATABASE]
         if held_cards:
-            user_card_context += f"[User's current cards: {', '.join(held_cards)}]\n"
-        if msg.wealth_context:
-            user_card_context += f"[User's financial profile: {msg.wealth_context}]\n"
-        if user_card_context:
-            user_card_context += "\n"
+            prefix += f"[User's current cards: {', '.join(held_cards)}]\n"
+    if msg.wealth_context:
+        prefix += f"[User's financial profile: {msg.wealth_context}]\n"
+    if prefix:
+        prefix += "\n"
 
-    full_message = user_card_context + msg.message
+    full_message = prefix + msg.message
 
     # Append user turn to history
     history.append(types.Content(role="user", parts=[types.Part(text=full_message)]))
