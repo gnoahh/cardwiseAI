@@ -135,7 +135,7 @@ async def chat(msg: ChatMessage):
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     temperature=0.7,
-                    max_output_tokens=1024,
+                    max_output_tokens=2048,
                 ),
             )
             for chunk in response:

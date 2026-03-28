@@ -798,7 +798,21 @@ def get_card(card_id: str):
 
 def get_cards_context_for_ai() -> str:
     """Returns a formatted string of all card data to inject into Gemini as grounding context."""
-    lines = ["=== CREDIT CARD BENEFIT DATABASE (Use ONLY this data. Do not invent benefits.) ===\n"]
+    lines = [
+        "=== CREDIT CARD BENEFIT DATABASE (Use ONLY this data. Do not use training knowledge — it may be outdated.) ===",
+        "",
+        "CATEGORY KEY LEGEND (do not equate categories — each is distinct):",
+        "  dining          = restaurants, cafes, fast food",
+        "  groceries       = supermarkets, grocery stores",
+        "  transit         = subway, bus, commuter rail, ferry, tolls, parking garages, rideshare (Uber/Lyft)",
+        "  travel_other    = hotels, airlines, car rentals, NOT transit/subway",
+        "  travel_chase_portal = purchases via Chase Travel portal only",
+        "  gas             = gas stations and EV charging",
+        "  streaming       = streaming subscriptions (Netflix, Spotify, etc.)",
+        "  other           = everything not listed above (default/catch-all rate)",
+        "  If a category is not listed in a card's earning_rates, it earns the 'other' rate.",
+        "",
+    ]
     for card in CARD_DATABASE.values():
         lines.append(f"CARD: {card['name']}")
         lines.append(f"  Annual Fee: ${card['annual_fee']}")
