@@ -52,35 +52,55 @@ export function totalLiabilities(w: WealthProfile): number {
 }
 
 // 10x rule: can you afford this purchase?
-export function affordabilityCheck(purchaseAmount: number, liquid: number, monthly: number) {
+// Checks high-APR debt (>6%) first — consistent with agent logic.
+export function affordabilityCheck(
+  purchaseAmount: number,
+  liquid: number,
+  monthly: number,
+  liabilities: LiabilityEntry[] = [],
+) {
   const tenX = purchaseAmount * 10;
-  const canAfford = liquid >= tenX;
-  const monthsToAfford = tenX > liquid ? Math.ceil((tenX - liquid) / (monthly * 0.2)) : 0; // assume 20% savings rate
-  const percentOfLiquid = (purchaseAmount / liquid) * 100;
+  const monthsToAfford = tenX > liquid ? Math.ceil((tenX - liquid) / (monthly * 0.2)) : 0;
+  const percentOfLiquid = liquid > 0 ? (purchaseAmount / liquid) * 100 : 100;
 
+  // Step 1 — High-interest debt check (>6% APR, same threshold as agent)
+  const highAPR = liabilities.filter((l) => l.amount > 0 && (l.rate ?? 0) > 6);
+  if (highAPR.length > 0 && purchaseAmount > 100) {
+    const worst = highAPR.reduce((a, b) => ((b.rate ?? 0) > (a.rate ?? 0) ? b : a));
+    const totalHighDebt = highAPR.reduce((s, l) => s + l.amount, 0);
+    return {
+      verdict: "wait" as const,
+      color: "#ef4444",
+      message: `Pay off debt first. You have $${totalHighDebt.toLocaleString()} in debt above 6% APR (worst: ${worst.label} at ${worst.rate}%). Paying that off is a guaranteed ${worst.rate}% return — better than any purchase.`,
+      tenX,
+      canAfford: false,
+      monthsToAfford,
+      percentOfLiquid,
+    };
+  }
+
+  // Step 2 — 10x liquid rule
   let verdict: "comfortable" | "caution" | "wait";
   let message: string;
   let color: string;
 
-  if (canAfford) {
+  if (liquid >= tenX) {
     verdict = "comfortable";
     color = "#52d9a0";
-    if (percentOfLiquid < 1) {
-      message = "Completely comfortable. This is pocket change relative to your liquid assets.";
-    } else {
-      message = `You can afford this. This purchase is ${percentOfLiquid.toFixed(1)}% of your liquid assets — well within the 10x rule.`;
-    }
+    message = percentOfLiquid < 1
+      ? "Comfortable. This is a small fraction of your liquid assets."
+      : `You can afford this. The purchase is ${percentOfLiquid.toFixed(1)}% of your liquid assets — within the 10x rule.`;
   } else if (liquid >= purchaseAmount * 3) {
     verdict = "caution";
     color = "#f59e6b";
-    message = `Proceed with caution. You have ${(liquid / purchaseAmount).toFixed(1)}x this amount — below the 10x threshold. Consider waiting ${monthsToAfford} month${monthsToAfford !== 1 ? "s" : ""} to save more.`;
+    message = `Proceed with caution. You have ${(liquid / purchaseAmount).toFixed(1)}x this amount — below the 10x threshold. Consider waiting ${monthsToAfford} month${monthsToAfford !== 1 ? "s" : ""} to build more cushion.`;
   } else {
     verdict = "wait";
     color = "#ef4444";
-    message = `Not recommended right now. You'd need $${tenX.toLocaleString()} in liquid savings to comfortably make this purchase. Keep saving — you're ${monthsToAfford} month${monthsToAfford !== 1 ? "s" : ""} away.`;
+    message = `Not recommended. You'd need $${tenX.toLocaleString()} in liquid savings for this purchase. Keep saving — ~${monthsToAfford} month${monthsToAfford !== 1 ? "s" : ""} away at a 20% savings rate.`;
   }
 
-  return { verdict, message, color, tenX, canAfford, monthsToAfford, percentOfLiquid };
+  return { verdict, message, color, tenX, canAfford: liquid >= tenX, monthsToAfford, percentOfLiquid };
 }
 
 // Seed localStorage with DEFAULT_WEALTH if the key has never been set.
@@ -117,11 +137,12 @@ export function getInsights(w: WealthProfile, monthlySpend: number): string[] {
     insights.push(`✅ Healthy debt-to-income ratio of ${dti.toFixed(0)}% — under the 36% threshold.`);
   }
 
-  // High-interest debt
-  const highDebt = w.liabilities.filter((l) => (l.rate || 0) > 15);
+  // High-interest debt (>6% APR — same threshold as agent affordability rules)
+  const highDebt = w.liabilities.filter((l) => (l.rate || 0) > 6);
   if (highDebt.length > 0) {
     const total = highDebt.reduce((s, l) => s + l.amount, 0);
-    insights.push(`⚠️ $${total.toLocaleString()} in high-interest debt (>15% APR). Prioritize paying this off before investing.`);
+    const worst = highDebt.reduce((a, b) => ((b.rate || 0) > (a.rate || 0) ? b : a));
+    insights.push(`⚠️ $${total.toLocaleString()} in debt above 6% APR (highest: ${worst.label} at ${worst.rate}%). Pay this off before discretionary purchases.`);
   }
 
   // Savings rate

@@ -217,7 +217,7 @@ export default function Home() {
             <WealthTracker monthlySpend={monthlySpend} transactions={transactions} />
           )}
 
-          {tab === "chat" && <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} />}
+          {tab === "chat" && <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} transactions={transactions} />}
         </div>
       </main>
     </div>

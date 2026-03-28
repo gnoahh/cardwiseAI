@@ -73,7 +73,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   const insights = getInsights(wealth, monthlySpend);
 
   const affordability = purchaseAmount && Number(purchaseAmount) > 0
-    ? affordabilityCheck(Number(purchaseAmount), liquid, wealth.monthlyIncome)
+    ? affordabilityCheck(Number(purchaseAmount), liquid, wealth.monthlyIncome, wealth.liabilities)
     : null;
 
   function updateAsset(id: string, field: keyof AssetEntry, value: string | number) {

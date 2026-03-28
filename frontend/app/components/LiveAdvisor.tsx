@@ -9,9 +9,15 @@ interface SpendingProfile {
   [key: string]: number | undefined;
 }
 
+interface Transaction {
+  category: string;
+  amount: number;
+}
+
 interface Props {
   selectedCardIds: string[];
   spending?: SpendingProfile;
+  transactions?: Transaction[];
 }
 
 type Mode = "chat" | "voice";
@@ -101,15 +107,32 @@ function getWealthSummary(): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-function getSpendingContext(spending?: SpendingProfile): string {
+function getSpendingContext(spending?: SpendingProfile, transactions?: Transaction[]): string {
   if (!spending) return "";
+
+  // Compute actual spend per category from transactions this month
+  const actual: Record<string, number> = {};
+  if (transactions && transactions.length > 0) {
+    for (const t of transactions) {
+      actual[t.category] = (actual[t.category] ?? 0) + t.amount;
+    }
+  }
+
   const entries = Object.entries(spending)
-    .filter(([, v]) => v && v > 0)
-    .map(([k, v]) => `${k} $${v}/mo`);
-  return entries.length ? entries.join(", ") : "";
+    .filter(([, budget]) => budget && budget > 0)
+    .map(([category, budget]) => {
+      const spent = actual[category];
+      if (spent !== undefined) {
+        const pct = Math.round((spent / budget!) * 100);
+        return `${category}: $${Math.round(spent)} spent of $${budget} budget (${pct}%)`;
+      }
+      return `${category}: $${budget} budget`;
+    });
+
+  return entries.length ? entries.join("; ") : "";
 }
 
-export default function LiveAdvisor({ selectedCardIds, spending }: Props) {
+export default function LiveAdvisor({ selectedCardIds, spending, transactions }: Props) {
   const [mode, setMode]               = useState<Mode>("chat");
   const [turns, setTurns]             = useState<Turn[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -165,7 +188,7 @@ export default function LiveAdvisor({ selectedCardIds, spending }: Props) {
           session_id: sessionId.current,
           user_cards: selectedCardIds,
           wealth_context: getWealthSummary(),
-          spending_context: getSpendingContext(spending),
+          spending_context: getSpendingContext(spending, transactions),
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -299,7 +322,7 @@ export default function LiveAdvisor({ selectedCardIds, spending }: Props) {
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "cards", ids: selectedCardIds }));
       const wealth   = getWealthSummary();
-      const spendCtx = getSpendingContext(spending);
+      const spendCtx = getSpendingContext(spending, transactions);
       if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth, spending: spendCtx }));
       const history = turnsRef.current.slice(-8);
       if (history.length > 0) {
