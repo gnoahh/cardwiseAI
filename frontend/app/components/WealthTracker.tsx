@@ -39,13 +39,8 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   const [purchaseAmount, setPurchaseAmount] = useState("");
   const userModified = useRef(false);
 
-  // Load from localStorage on mount (only if user previously saved data)
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(WEALTH_KEY);
-      if (stored) setWealth(JSON.parse(stored));
-    } catch {}
-  }, []);
+  // Do NOT load from localStorage on mount — always start with a clean slate.
+  // User must explicitly click "Load Demo Data" to populate the tracker.
 
   // Save to localStorage only after the user has made a change (not on initial mount)
   useEffect(() => {
