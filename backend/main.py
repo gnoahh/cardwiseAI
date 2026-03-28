@@ -107,19 +107,19 @@ async def chat(msg: ChatMessage):
     # Build conversation history
     history = chat_histories.get(msg.session_id, [])
 
-    # Prepend card context on first message; prepend wealth on every message
-    # so the model always has financial data when answering affordability questions.
+    # Prepend context on every message so the model never forgets which cards
+    # the user owns and never hallucinates cards they don't have.
+    held_cards = [CARD_DATABASE[cid]["name"] for cid in msg.user_cards if cid in CARD_DATABASE]
     prefix = ""
-    if not history:
-        held_cards = [CARD_DATABASE[cid]["name"] for cid in msg.user_cards if cid in CARD_DATABASE]
-        if held_cards:
-            prefix += f"[User's current cards: {', '.join(held_cards)}]\n"
+    if held_cards:
+        prefix += f"[User's wallet — ONLY these cards: {', '.join(held_cards)}]\n"
+    else:
+        prefix += "[User's wallet — no cards selected yet. Suggest cards, do not assume ownership.]\n"
     if msg.wealth_context:
         prefix += f"[User's financial profile: {msg.wealth_context}]\n"
     if msg.spending_context:
         prefix += f"[User's monthly spending: {msg.spending_context}]\n"
-    if prefix:
-        prefix += "\n"
+    prefix += "\n"
 
     full_message = prefix + msg.message
 
@@ -392,7 +392,11 @@ async def live_session(websocket: WebSocket):
                             held = [CARD_DATABASE[c]["name"] for c in data.get("ids", []) if c in CARD_DATABASE]
                             if held:
                                 await session.send_realtime_input(
-                                    text=f"[Context: The user currently holds these cards: {', '.join(held)}. Always factor this in when giving card recommendations.]"
+                                    text=f"[User's wallet — ONLY these cards: {', '.join(held)}. Never recommend or reference any card not in this list as if they own it. For purchases, only suggest cards from this list. If none fit, say so and suggest a new card to get.]"
+                                )
+                            else:
+                                await session.send_realtime_input(
+                                    text="[User's wallet is empty — no cards selected. Do not assume they own any card. Suggest cards they could get.]"
                                 )
                         elif kind == "wealth":
                             summary = data.get("summary", "")
