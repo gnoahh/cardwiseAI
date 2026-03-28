@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Trash2, TrendingUp, TrendingDown, Shield, AlertCircle } from "lucide-react";
 import {
   DEFAULT_WEALTH,
@@ -32,20 +32,43 @@ const LIABILITY_LABELS = ["Credit Card Balance", "Student Loans", "Auto Loan", "
 
 const WEALTH_KEY = "cardwise_wealth";
 
-export default function WealthTracker({ monthlySpend, transactions = [] }: { monthlySpend: number; transactions?: Transaction[] }) {
-  const [wealth, setWealth] = useState<WealthProfile>(DEFAULT_WEALTH);
-  const [purchaseAmount, setPurchaseAmount] = useState("");
+const EMPTY_WEALTH: WealthProfile = { monthlyIncome: 0, assets: [], liabilities: [] };
 
-  // Persist to / restore from localStorage
+export default function WealthTracker({ monthlySpend, transactions = [] }: { monthlySpend: number; transactions?: Transaction[] }) {
+  const [wealth, setWealth] = useState<WealthProfile>(EMPTY_WEALTH);
+  const [purchaseAmount, setPurchaseAmount] = useState("");
+  const userModified = useRef(false);
+
+  // Load from localStorage on mount (only if user previously saved data)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(WEALTH_KEY);
       if (stored) setWealth(JSON.parse(stored));
     } catch {}
   }, []);
+
+  // Save to localStorage only after the user has made a change (not on initial mount)
   useEffect(() => {
+    if (!userModified.current) return;
     try { localStorage.setItem(WEALTH_KEY, JSON.stringify(wealth)); } catch {}
   }, [wealth]);
+
+  function applyWealth(w: WealthProfile) {
+    userModified.current = true;
+    setWealth(w);
+  }
+
+  function loadDemoData() {
+    userModified.current = true;
+    setWealth(DEFAULT_WEALTH);
+    localStorage.setItem(WEALTH_KEY, JSON.stringify(DEFAULT_WEALTH));
+  }
+
+  function clearData() {
+    userModified.current = true;
+    setWealth(EMPTY_WEALTH);
+    localStorage.removeItem(WEALTH_KEY);
+  }
   const [activeSection, setActiveSection] = useState<"overview" | "assets" | "liabilities" | "check">("overview");
 
   const nw = netWorth(wealth);
@@ -59,6 +82,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
     : null;
 
   function updateAsset(id: string, field: keyof AssetEntry, value: string | number) {
+    userModified.current = true;
     setWealth((w) => ({
       ...w,
       assets: w.assets.map((a) => a.id === id ? { ...a, [field]: value } : a),
@@ -66,6 +90,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   }
 
   function updateLiability(id: string, field: keyof LiabilityEntry, value: string | number) {
+    userModified.current = true;
     setWealth((w) => ({
       ...w,
       liabilities: w.liabilities.map((l) => l.id === id ? { ...l, [field]: value } : l),
@@ -73,6 +98,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   }
 
   function addAsset() {
+    userModified.current = true;
     setWealth((w) => ({
       ...w,
       assets: [...w.assets, { id: `a${Date.now()}`, label: "New Asset", amount: 0, type: "liquid" }],
@@ -80,6 +106,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   }
 
   function addLiability() {
+    userModified.current = true;
     setWealth((w) => ({
       ...w,
       liabilities: [...w.liabilities, { id: `l${Date.now()}`, label: "New Debt", amount: 0, rate: 0 }],
@@ -87,10 +114,12 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   }
 
   function removeAsset(id: string) {
+    userModified.current = true;
     setWealth((w) => ({ ...w, assets: w.assets.filter((a) => a.id !== id) }));
   }
 
   function removeLiability(id: string) {
+    userModified.current = true;
     setWealth((w) => ({ ...w, liabilities: w.liabilities.filter((l) => l.id !== id) }));
   }
 
@@ -103,6 +132,23 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
 
   return (
     <div className="space-y-5">
+
+      {/* Demo / Clear controls */}
+      <div className="flex items-center justify-between">
+        <p className="text-[#555] text-xs">Enter your financial data or load a sample profile.</p>
+        <div className="flex gap-2">
+          <button onClick={clearData}
+            className="text-xs px-3 py-1.5 rounded-xl glass transition-colors"
+            style={{ color: "#555" }}>
+            Clear
+          </button>
+          <button onClick={loadDemoData}
+            className="text-xs px-3 py-1.5 rounded-xl transition-all gradient-bg text-white">
+            Load Demo Data
+          </button>
+        </div>
+      </div>
+
       {/* Net Worth Hero */}
       <div
         className="rounded-2xl p-6"
@@ -168,7 +214,7 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
               <input
                 type="number"
                 value={wealth.monthlyIncome}
-                onChange={(e) => setWealth((w) => ({ ...w, monthlyIncome: Number(e.target.value) }))}
+                onChange={(e) => { userModified.current = true; setWealth((w) => ({ ...w, monthlyIncome: Number(e.target.value) })); }}
                 className="flex-1 bg-transparent text-white text-2xl font-bold focus:outline-none"
               />
               <span className="text-[#666] text-sm">/month</span>

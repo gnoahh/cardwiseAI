@@ -3,8 +3,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Camera, CameraOff, X, Sparkles, Send, Radio, MessageSquare } from "lucide-react";
 
+interface SpendingProfile {
+  dining?: number; groceries?: number; travel?: number;
+  gas?: number; entertainment?: number; other?: number;
+  [key: string]: number | undefined;
+}
+
 interface Props {
   selectedCardIds: string[];
+  spending?: SpendingProfile;
 }
 
 type Mode = "chat" | "voice";
@@ -81,7 +88,15 @@ function getWealthSummary(): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LiveAdvisor({ selectedCardIds }: Props) {
+function getSpendingContext(spending?: SpendingProfile): string {
+  if (!spending) return "";
+  const entries = Object.entries(spending)
+    .filter(([, v]) => v && v > 0)
+    .map(([k, v]) => `${k} $${v}/mo`);
+  return entries.length ? entries.join(", ") : "";
+}
+
+export default function LiveAdvisor({ selectedCardIds, spending }: Props) {
   const [mode, setMode]               = useState<Mode>("chat");
   const [turns, setTurns]             = useState<Turn[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -137,6 +152,7 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
           session_id: sessionId.current,
           user_cards: selectedCardIds,
           wealth_context: getWealthSummary(),
+          spending_context: getSpendingContext(spending),
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -269,8 +285,9 @@ export default function LiveAdvisor({ selectedCardIds }: Props) {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "cards", ids: selectedCardIds }));
-      const wealth = getWealthSummary();
-      if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth }));
+      const wealth   = getWealthSummary();
+      const spendCtx = getSpendingContext(spending);
+      if (wealth) ws.send(JSON.stringify({ type: "wealth", summary: wealth, spending: spendCtx }));
       const history = turnsRef.current.slice(-8);
       if (history.length > 0) {
         const lines = history.map(t => `${t.role === "user" ? "User" : "Advisor"}: ${t.text}`).join("\n");

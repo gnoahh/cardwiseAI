@@ -13,7 +13,6 @@ import AIChat from "./components/AIChat";
 import LiveAdvisor from "./components/LiveAdvisor";
 import { totalSpend, type Transaction } from "./lib/transactions";
 import { matchCreditsFromTransactions } from "./lib/creditMatcher";
-import { initWealthStorage } from "./lib/wealth";
 import type { Card } from "./lib/types";
 
 type Tab = "dashboard" | "cards" | "benefits" | "spend" | "wealth" | "chat";
@@ -51,7 +50,6 @@ export default function Home() {
 
   useEffect(() => {
     fetchCards().then(setAllCards).catch(() => {});
-    initWealthStorage(); // seed localStorage so AI Advisor always has financial context
   }, []);
 
   const selectedCards = allCards.filter((c) => selectedCardIds.includes(c.id));
@@ -219,7 +217,7 @@ export default function Home() {
             <WealthTracker monthlySpend={monthlySpend} transactions={transactions} />
           )}
 
-          {tab === "chat" && <LiveAdvisor selectedCardIds={selectedCardIds} />}
+          {tab === "chat" && <LiveAdvisor selectedCardIds={selectedCardIds} spending={spending} />}
         </div>
       </main>
     </div>

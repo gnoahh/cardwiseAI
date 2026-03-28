@@ -48,7 +48,8 @@ class ChatMessage(BaseModel):
     message: str
     session_id: str
     user_cards: list = []
-    wealth_context: str = ""  # e.g. "net worth $88k, liquid $30k, monthly income $7.5k"
+    wealth_context: str = ""    # e.g. "net worth $88k, liquid $30k, monthly income $7.5k"
+    spending_context: str = ""  # e.g. "dining: $380/$400, groceries: $200/$400"
 
 
 class ROIRequest(BaseModel):
@@ -115,6 +116,8 @@ async def chat(msg: ChatMessage):
             prefix += f"[User's current cards: {', '.join(held_cards)}]\n"
     if msg.wealth_context:
         prefix += f"[User's financial profile: {msg.wealth_context}]\n"
+    if msg.spending_context:
+        prefix += f"[User's monthly spending: {msg.spending_context}]\n"
     if prefix:
         prefix += "\n"
 
@@ -393,10 +396,13 @@ async def live_session(websocket: WebSocket):
                                 )
                         elif kind == "wealth":
                             summary = data.get("summary", "")
+                            spending = data.get("spending", "")
                             if summary:
-                                await session.send_realtime_input(
-                                    text=f"[Context: User's financial profile — {summary}. Use this when answering any affordability questions.]"
-                                )
+                                ctx = f"[Context: User's financial profile — {summary}."
+                                if spending:
+                                    ctx += f" Monthly spending — {spending}."
+                                ctx += " Use this for all affordability questions.]"
+                                await session.send_realtime_input(text=ctx)
                         elif kind == "context":
                             text = data.get("text", "")
                             if text:
