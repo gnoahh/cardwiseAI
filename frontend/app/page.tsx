@@ -41,6 +41,8 @@ export default function Home() {
   const [allCards, setAllCards] = useState<Card[]>([]);
   // Track which tabs have been visited — once mounted, keep mounted (never reset state on tab switch)
   const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(new Set<Tab>(["dashboard"]));
+  // Increments when demo data is loaded — WealthTracker watches this to load DEFAULT_WEALTH in sync
+  const [demoLoadedCount, setDemoLoadedCount] = useState(0);
 
   // Transactions from Plaid/demo
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -194,6 +196,7 @@ export default function Home() {
                 onNavigate={(t, opts) => navigateTo(t as Tab, opts)}
                 onTransactionsLoaded={handleTransactionsLoaded}
                 onPlaidCardsDetected={handlePlaidCardsDetected}
+                onDemoLoaded={() => setDemoLoadedCount((n) => n + 1)}
               />
             )}
           </div>
@@ -244,7 +247,7 @@ export default function Home() {
 
           <div style={{ display: tab === "wealth" ? undefined : "none" }}>
             {mountedTabs.has("wealth") && (
-              <WealthTracker monthlySpend={monthlySpend} transactions={transactions} />
+              <WealthTracker monthlySpend={monthlySpend} transactions={transactions} demoLoadedCount={demoLoadedCount} />
             )}
           </div>
 

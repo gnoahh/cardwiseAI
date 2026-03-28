@@ -34,13 +34,19 @@ const WEALTH_KEY = "cardwise_wealth";
 
 const EMPTY_WEALTH: WealthProfile = { monthlyIncome: 0, assets: [], liabilities: [] };
 
-export default function WealthTracker({ monthlySpend, transactions = [] }: { monthlySpend: number; transactions?: Transaction[] }) {
+export default function WealthTracker({ monthlySpend, transactions = [], demoLoadedCount = 0 }: { monthlySpend: number; transactions?: Transaction[]; demoLoadedCount?: number }) {
   const [wealth, setWealth] = useState<WealthProfile>(EMPTY_WEALTH);
   const [purchaseAmount, setPurchaseAmount] = useState("");
   const userModified = useRef(false);
 
-  // Do NOT load from localStorage on mount — always start with a clean slate.
-  // User must explicitly click "Load Demo Data" to populate the tracker.
+  // When Dashboard's "Use demo data" fires, load DEFAULT_WEALTH in sync.
+  // demoLoadedCount increments each time demo is loaded — skip the initial 0.
+  useEffect(() => {
+    if (demoLoadedCount === 0) return;
+    userModified.current = true;
+    setWealth(DEFAULT_WEALTH);
+    localStorage.setItem(WEALTH_KEY, JSON.stringify(DEFAULT_WEALTH));
+  }, [demoLoadedCount]);
 
   // Save to localStorage only after the user has made a change (not on initial mount)
   useEffect(() => {
@@ -51,12 +57,6 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   function applyWealth(w: WealthProfile) {
     userModified.current = true;
     setWealth(w);
-  }
-
-  function loadDemoData() {
-    userModified.current = true;
-    setWealth(DEFAULT_WEALTH);
-    localStorage.setItem(WEALTH_KEY, JSON.stringify(DEFAULT_WEALTH));
   }
 
   function clearData() {
@@ -128,20 +128,14 @@ export default function WealthTracker({ monthlySpend, transactions = [] }: { mon
   return (
     <div className="space-y-5">
 
-      {/* Demo / Clear controls */}
+      {/* Clear control — demo data is loaded from the Dashboard "Use demo data" button */}
       <div className="flex items-center justify-between">
-        <p className="text-[#555] text-xs">Enter your financial data or load a sample profile.</p>
-        <div className="flex gap-2">
-          <button onClick={clearData}
-            className="text-xs px-3 py-1.5 rounded-xl glass transition-colors"
-            style={{ color: "#555" }}>
-            Clear
-          </button>
-          <button onClick={loadDemoData}
-            className="text-xs px-3 py-1.5 rounded-xl transition-all gradient-bg text-white">
-            Load Demo Data
-          </button>
-        </div>
+        <p className="text-[#555] text-xs">Enter your financial data or use demo data from the Overview tab.</p>
+        <button onClick={clearData}
+          className="text-xs px-3 py-1.5 rounded-xl glass transition-colors"
+          style={{ color: "#555" }}>
+          Clear
+        </button>
       </div>
 
       {/* Net Worth Hero */}

@@ -126,15 +126,22 @@ async def chat(msg: ChatMessage):
 
     full_message = prefix + msg.message
 
-    # Append user turn to history
-    history.append(types.Content(role="user", parts=[types.Part(text=full_message)]))
+    # Store only the bare user message in history — not the context prefix.
+    # This prevents the model from echoing the [User's wallet...] tags in responses.
+    # Fresh context is prepended to the current turn every call, so the model always has it.
+    history.append(types.Content(role="user", parts=[types.Part(text=msg.message)]))
 
     async def generate():
         full_response = ""
         try:
+            # Build contents: history without current turn + current turn WITH context prefix
+            # This keeps the context fresh every call without polluting history with raw tags.
+            contents_for_model = history[:-1] + [
+                types.Content(role="user", parts=[types.Part(text=full_message)])
+            ]
             response = client.models.generate_content_stream(
                 model="gemini-2.5-flash",
-                contents=history,
+                contents=contents_for_model,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     temperature=0.7,

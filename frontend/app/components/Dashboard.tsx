@@ -21,6 +21,7 @@ interface Props {
   onNavigate: (tab: string, opts?: { openROI?: boolean }) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
   onTransactionsLoaded?: (txs: Transaction[]) => void;
   onPlaidCardsDetected?: (cardIds: string[]) => void;
+  onDemoLoaded?: () => void;
 }
 
 const MONTH_BUDGET = 3200;
@@ -54,7 +55,7 @@ function CustomLabel(props: PieLabelRenderProps) {
   );
 }
 
-export default function Dashboard({ selectedCards, getCreditUsed, onNavigate, onTransactionsLoaded, onPlaidCardsDetected }: Props) {
+export default function Dashboard({ selectedCards, getCreditUsed, onNavigate, onTransactionsLoaded, onPlaidCardsDetected, onDemoLoaded }: Props) {
   const [bankConnected, setBankConnected] = useState(false);
   const [showPlaidModal, setShowPlaidModal] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -93,6 +94,7 @@ export default function Dashboard({ selectedCards, getCreditUsed, onNavigate, on
     setTransactions(MOCK_TRANSACTIONS);
     setBankConnected(true);
     setShowPlaidModal(false);
+    onDemoLoaded?.();
     onTransactionsLoaded?.(MOCK_TRANSACTIONS);
     onPlaidCardsDetected?.(PLAID_DETECTED_CARD_IDS);
   }
